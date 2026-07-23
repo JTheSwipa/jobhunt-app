@@ -4,6 +4,7 @@ import { prisma } from "../db.js";
 import { applyVisibility, listToggleNodes } from "../cv/visibility.js";
 import { buildHtml, renderToPdf, DEFAULT_ORDER } from "../cv/render.js";
 import type { CvData } from "../cv/schema.js";
+import { ollamaProvider } from "../ai/ollamaProvider.js";
 
 export const cvRouter = Router();
 
@@ -120,5 +121,35 @@ cvRouter.post("/profiles/:id/render", async (req, res) => {
     res.json(result);
   } catch (err) {
     res.status(500).json({ error: "render failed", detail: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+// --- AI tailoring suggestions -----------------------------------------------
+// Suggestions only — nothing here mutates the profile. The caller applies
+// accepted suggestions via the existing PUT /profiles/:id visibility update,
+// same as a manual toggle. See plan Feature 7 ("human reviews and confirms").
+
+const suggestSchema = z.object({ targetRole: z.string().min(1) });
+
+cvRouter.post("/profiles/:id/suggest", async (req, res) => {
+  const parsed = suggestSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
+
+  const profile = await prisma.cvProfile.findFirst({ where: { id: req.params.id, userId: USER_ID } });
+  if (!profile) return res.status(404).json({ error: "not found" });
+  const master = await prisma.masterCv.findUnique({ where: { id: profile.masterCvId } });
+  if (!master) return res.status(404).json({ error: "master not found" });
+
+  const cv = master.data as unknown as CvData;
+  const toggleNodes = listToggleNodes(cv);
+
+  try {
+    const suggestions = await ollamaProvider.suggest({ cv, toggleNodes, targetRole: parsed.data.targetRole });
+    res.json(suggestions);
+  } catch (err) {
+    res.status(502).json({
+      error: "AI suggestion failed (is Ollama running? OLLAMA_HOST/OLLAMA_MODEL env vars)",
+      detail: err instanceof Error ? err.message : String(err),
+    });
   }
 });
