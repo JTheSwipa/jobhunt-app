@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { applyVisibility, listToggleNodes, type VisibilityMap } from "./visibility.js";
 import { SECTION_KEYS, type CvData } from "./schema.js";
+import { DEFAULT_ORDER } from "./render.js";
 
 // ---------------------------------------------------------------------------
 // Fixture — one realistic master CV covering every real CvSections key, the
@@ -158,6 +159,24 @@ describe("SECTION_KEYS drift guard", () => {
     const knownSectionNames = new Set<string>(["profile", ...Object.keys(cv.sections)]);
     for (const key of SECTION_KEYS) {
       expect(knownSectionNames.has(key), `SECTION_KEYS has "${key}" but no matching section exists`).toBe(true);
+    }
+  });
+});
+
+describe("DEFAULT_ORDER covers every SECTION_KEYS name", () => {
+  // SECTION_KEYS (schema.ts) is the CV data model's section vocabulary.
+  // DEFAULT_ORDER (render.ts) is the renderer's closed list of everything it
+  // physically knows how to draw: the same 9 names, plus "academic_training"
+  // and "conferences" -- two custom sections render.ts finds by hardcoded
+  // title-substring match, with no schema representation at all. These two
+  // lists were never meant to be equal; this is a one-directional coverage
+  // check, not an equality check. It catches the real drift case -- a name
+  // added to SECTION_KEYS that the renderer's fixed dispatch table doesn't
+  // actually know how to draw -- without false-flagging DEFAULT_ORDER's
+  // legitimate extra 2 entries.
+  it("every SECTION_KEYS name appears somewhere in DEFAULT_ORDER", () => {
+    for (const key of SECTION_KEYS) {
+      expect(DEFAULT_ORDER, `SECTION_KEYS has "${key}" but DEFAULT_ORDER doesn't`).toContain(key);
     }
   });
 });
