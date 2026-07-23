@@ -1,0 +1,15 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: jobhunt
+      POSTGRES_PASSWORD: jobhunt
+      POSTGRES_DB: jobhunt
+    ports:
+      - "5433:5432"
+    volumes:
+      - jobhunt-db-data:/var/lib/postgresql/data
+
+volumes:
+  jobhunt-db-data:

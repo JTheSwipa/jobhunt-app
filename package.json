@@ -1,0 +1,16 @@
+{
+  "name": "jobhunt-app",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "apps/web",
+    "apps/api",
+    "mcp-server"
+  ],
+  "scripts": {
+    "dev:api": "npm run dev --workspace=apps/api",
+    "dev:web": "npm run dev --workspace=apps/web",
+    "db:up": "docker compose up -d db",
+    "db:migrate": "npm run prisma:migrate --workspace=apps/api"
+  }
+}
