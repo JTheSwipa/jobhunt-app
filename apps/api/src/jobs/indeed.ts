@@ -30,6 +30,7 @@ interface IndeedScanResult {
 
 export const indeedSource: JobSource = {
   id: "indeed",
+  displayName: "Indeed",
   async search({ terms, locations, days = 7 }): Promise<Listing[]> {
     const args = [SCRIPT_PATH, "--days", String(days)];
     for (const t of terms ?? []) args.push("--term", t);

@@ -16,5 +16,6 @@ export interface Listing {
 
 export interface JobSource {
   id: string;
+  displayName: string;
   search(params: { terms?: string[]; locations?: string[]; days?: number }): Promise<Listing[]>;
 }

@@ -1,16 +1,12 @@
 import { Router } from "express";
 import { z } from "zod";
 import { prisma } from "../db.js";
-import { indeedSource } from "../jobs/indeed.js";
-import type { JobSource, Listing } from "../jobs/base.js";
+import { getJobSourceEntry } from "../jobs/registry.js";
+import type { Listing } from "../jobs/base.js";
 
 export const jobsRouter = Router();
 
 const USER_ID = "local";
-
-const SOURCES: Record<string, JobSource> = {
-  indeed: indeedSource,
-};
 
 jobsRouter.get("/", async (req, res) => {
   const site = req.query.site ? String(req.query.site) : undefined;
@@ -22,7 +18,7 @@ jobsRouter.get("/", async (req, res) => {
 });
 
 const searchSchema = z.object({
-  source: z.enum(["indeed"]), // careeros/linkedin join this union once built (Phase 1 remainder / Phase 2)
+  source: z.enum(["indeed", "careeros"]), // linkedin joins this union once built (Phase 2)
   terms: z.array(z.string()).optional(),
   locations: z.array(z.string()).optional(),
   days: z.number().int().positive().max(30).optional(),
@@ -60,8 +56,15 @@ jobsRouter.post("/search", async (req, res) => {
   const parsed = searchSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
   const { source, terms, locations, days } = parsed.data;
+
+  const entry = getJobSourceEntry(source);
+  if (!entry) return res.status(404).json({ error: `unknown job source "${source}"` });
+  if (!entry.available) {
+    return res.status(409).json({ error: `${entry.source.displayName} is registered but not available yet` });
+  }
+
   try {
-    const listings = await SOURCES[source].search({ terms, locations, days });
+    const listings = await entry.source.search({ terms, locations, days });
     const result = await persistListings(listings);
     res.json({ source, found: listings.length, ...result });
   } catch (err) {
