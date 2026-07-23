@@ -3,10 +3,22 @@
 // render_cv.py's rxresume schema already carries a `hidden` boolean on every
 // section and every item, but the original Python renderer only respected
 // it for 2 of 11 sections (experience, projects). This module makes it
-// respected everywhere: `listToggleNodes` flattens a CV into every
-// section/item that can be toggled, the shape a checkbox editor UI needs.
+// respected everywhere, and adds a second layer on top: a CvProfile's
+// `visibility` map, which *overrides* the master CV's own hidden flags
+// without mutating the master — so the same master CV can produce a
+// "Corporate" render and a "Startup" render with different sections/items
+// shown, purely by swapping which overrides get applied at render time.
+//
+// Override keys:
+//   "section:<key>"        -> hidden boolean for a top-level section
+//   "section:custom:<id>"  -> hidden boolean for a customSections entry
+//   "item:<itemId>"        -> hidden boolean for any item (ids are unique
+//                              across the whole document in the rxresume
+//                              export format, so no section prefix needed)
 
-import type { CvData } from "./schema.js";
+import type { CvCustomSection, CvData, CvSection } from "./schema.js";
+
+export type VisibilityMap = Record<string, boolean>;
 
 export interface ToggleNode {
   key: string;
@@ -95,4 +107,46 @@ export function listToggleNodes(data: CvData): ToggleNode[] {
   }
 
   return nodes;
+}
+
+/**
+ * Returns a deep-cloned copy of `data` with `overrides` applied on top of
+ * whatever hidden flags the master CV already carries. The master itself is
+ * never mutated — this is what lets one master produce many named variants.
+ */
+export function applyVisibility(data: CvData, overrides: VisibilityMap): CvData {
+  const clone: CvData = structuredClone(data);
+
+  if ("section:profile" in overrides) {
+    clone.summary.hidden = overrides["section:profile"];
+  }
+
+  for (const [key, section] of Object.entries(clone.sections)) {
+    if (!section) continue;
+    const sectionOverrideKey = `section:${key}`;
+    if (sectionOverrideKey in overrides) {
+      (section as CvSection<{ id: string; hidden?: boolean }>).hidden = overrides[sectionOverrideKey];
+    }
+    for (const item of section.items as Array<{ id: string; hidden?: boolean }>) {
+      const itemOverrideKey = `item:${item.id}`;
+      if (itemOverrideKey in overrides) {
+        item.hidden = overrides[itemOverrideKey];
+      }
+    }
+  }
+
+  for (const cs of clone.customSections ?? ([] as CvCustomSection[])) {
+    const sectionOverrideKey = `section:custom:${cs.id}`;
+    if (sectionOverrideKey in overrides) {
+      cs.hidden = overrides[sectionOverrideKey];
+    }
+    for (const item of cs.items) {
+      const itemOverrideKey = `item:${item.id}`;
+      if (itemOverrideKey in overrides) {
+        item.hidden = overrides[itemOverrideKey];
+      }
+    }
+  }
+
+  return clone;
 }
