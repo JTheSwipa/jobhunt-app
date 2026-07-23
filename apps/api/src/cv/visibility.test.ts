@@ -209,15 +209,36 @@ function buildOverrides(key: string, state: FlagState): VisibilityMap {
   return state === "absent" ? {} : { [key]: state };
 }
 
-// NOTE: asserting Boolean(...) rather than raw `.toBe(expected)` on purpose.
-// applyVisibility does not normalize an absent master flag to `false` — when
-// no override applies it passes the master's raw value through unchanged
-// (here: `undefined`, since master="absent" deletes the property). Every
-// actual consumer in this codebase (render.ts, listToggleNodes) reads
-// `hidden` via truthy checks, never strict equality, so `undefined` and
-// `false` are functionally identical everywhere it matters. Asserting raw
-// equality here would fail on a non-bug and misreport the engine's real
-// contract; Boolean(...) is the accurate test of that contract.
+// NOTE: the matrix below asserts Boolean(...) rather than raw `.toBe(...)`
+// on purpose — see "documented contract: absent hidden flags stay absent"
+// below for why, and for the passthrough behavior stated directly.
+
+describe("documented contract: absent hidden flags stay absent, not normalized to false", () => {
+  // This is intentional, not an oversight: applyVisibility passes an absent
+  // master `hidden` flag through untouched (`undefined`) when no override
+  // applies — it never coerces it to a definite `false`. That's safe only
+  // because every real consumer in this codebase (render.ts, listToggleNodes)
+  // reads `hidden` via truthy checks (`!hidden`, `Boolean(hidden)`), never
+  // strict equality (`=== false`). A future consumer that used strict
+  // equality would break silently on CVs whose flags were never set. This
+  // test records that tradeoff as a deliberate decision, not a discovery.
+  it("applyVisibility passes an absent hidden flag through as undefined, not false", () => {
+    const cv = makeMasterCv();
+    delete cv.sections.experience.hidden;
+    delete cv.sections.experience.items[0].hidden;
+
+    const result = applyVisibility(cv, {}); // no overrides at all
+
+    // The raw contract: absent stays absent.
+    expect(result.sections.experience?.hidden).toBeUndefined();
+    expect(result.sections.experience?.items[0]?.hidden).toBeUndefined();
+
+    // Why that's safe: every real consumer treats it as "not hidden."
+    expect(Boolean(result.sections.experience?.hidden)).toBe(false);
+    const node = listToggleNodes(result).find((n) => n.key === "section:experience");
+    expect(node?.hidden).toBe(false);
+  });
+});
 
 describe("applyVisibility — override precedence matrix (section-level)", () => {
   it.each(MATRIX_CASES)("master=$master, override=$override -> hidden=$expected", ({ master, override, expected }) => {
