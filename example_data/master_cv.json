@@ -1,0 +1,87 @@
+{
+  "basics": {
+    "name": "Alex Rivera",
+    "headline": "Data Science & Software Engineering",
+    "email": "alex.rivera@example.com",
+    "phone": "+1 555 010 2020",
+    "location": "Lisbon, Portugal",
+    "website": { "url": "https://github.com/example-alex", "label": "github.com/example-alex" }
+  },
+  "summary": {
+    "hidden": false,
+    "content": "<p>Data scientist with a background in applied machine learning and backend engineering. Experienced turning messy data into decision support tools and shipping production automation.</p>"
+  },
+  "sections": {
+    "profiles": {
+      "hidden": false,
+      "items": [
+        { "id": "prof-linkedin", "hidden": false, "network": "LinkedIn", "website": { "label": "linkedin.com/in/example-alex" } }
+      ]
+    },
+    "skills": {
+      "hidden": false,
+      "items": [
+        { "id": "skill-python", "hidden": false, "name": "Python", "proficiency": "Advanced", "keywords": ["pandas", "scikit-learn", "FastAPI"] },
+        { "id": "skill-ts", "hidden": false, "name": "TypeScript", "proficiency": "Intermediate", "keywords": ["React", "Node.js", "Express"] },
+        { "id": "skill-sql", "hidden": false, "name": "SQL", "proficiency": "Advanced", "keywords": ["Postgres"] }
+      ]
+    },
+    "experience": {
+      "hidden": false,
+      "items": [
+        {
+          "id": "exp-acme",
+          "hidden": false,
+          "position": "Data Analytics Intern",
+          "company": "Acme Corp",
+          "location": "Remote",
+          "period": "Jun 2025 - Sep 2025",
+          "description": "<ul><li>Built a dashboard cutting weekly reporting time by 40%</li><li>Automated a data-cleaning pipeline used by 3 teams</li></ul>"
+        },
+        {
+          "id": "exp-startup",
+          "hidden": false,
+          "position": "Founding Engineer (part-time)",
+          "company": "Small Startup Co",
+          "location": "Lisbon, PT",
+          "period": "Jan 2025 - Present",
+          "description": "<ul><li>Shipped a full-stack product feature end to end, from schema to UI</li></ul>"
+        }
+      ]
+    },
+    "projects": {
+      "hidden": false,
+      "items": [
+        {
+          "id": "proj-jobhunt",
+          "hidden": false,
+          "name": "Job-Hunt App",
+          "website": { "label": "github.com/example-alex/jobhunt-app" },
+          "description": "<ul><li>React + Node/TypeScript job-hunt tool with a CV visibility editor and Postgres-backed tracker</li></ul>"
+        }
+      ]
+    },
+    "education": {
+      "hidden": false,
+      "items": [
+        { "id": "edu-uni", "hidden": false, "degree": "BSc Data Science", "school": "Example University", "location": "Lisbon, PT", "period": "2022 - 2025" }
+      ]
+    },
+    "certifications": { "hidden": false, "items": [] },
+    "languages": {
+      "hidden": false,
+      "items": [
+        { "id": "lang-en", "hidden": false, "language": "English", "fluency": "Native" },
+        { "id": "lang-pt", "hidden": false, "language": "Portuguese", "fluency": "Fluent" }
+      ]
+    },
+    "awards": { "hidden": false, "items": [] },
+    "interests": {
+      "hidden": false,
+      "items": [
+        { "id": "int-chess", "hidden": false, "name": "Chess", "keywords": [] }
+      ]
+    }
+  },
+  "customSections": []
+}
