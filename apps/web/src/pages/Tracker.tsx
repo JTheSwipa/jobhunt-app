@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { api, type Application } from "../lib/api";
 
-const STATUSES = ["applied", "interview", "offer", "rejected"] as const;
+const STATUSES = ["shortlist", "applied", "interview", "offer", "rejected"] as const;
 
 export default function Tracker() {
   const [applications, setApplications] = useState<Application[]>([]);
