@@ -25,12 +25,18 @@ model Application {
   atsPlatform String?
   cvVersion   String?
   coverLetter String?
-  status      String    @default("applied") // applied | interview | offer | rejected
+  status      String    @default("applied") // shortlist | applied | interview | offer | rejected
   responseDate DateTime?
   responseType String?
   notes       String?
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
+
+  // Set when this row was materialized from a Job Board listing (shortlist
+  // or applied). Optional + unique: manually-added tracker rows (the
+  // original workflow) never have one. See jobs.ts PATCH /:id for the sync.
+  jobListingId String?     @unique
+  jobListing   JobListing? @relation(fields: [jobListingId], references: [id], onDelete: SetNull)
 
   @@index([userId])
 }
@@ -48,6 +54,7 @@ model JobListing {
   datePosted DateTime?
   jobUrl     String   @unique
   notes      String?
+  application Application?
 
   @@index([userId])
   @@index([site])

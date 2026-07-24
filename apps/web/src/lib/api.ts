@@ -49,6 +49,7 @@ export interface Application {
   responseDate?: string | null;
   responseType?: string | null;
   notes?: string | null;
+  jobListingId?: string | null;
 }
 
 export interface JobListing {
@@ -76,6 +77,7 @@ export const api = {
     saveMaster: (name: string, data: unknown) =>
       request<MasterCv>("/cv/master", { method: "PUT", body: JSON.stringify({ name, data }) }),
     toggles: (masterId: string) => request<ToggleNode[]>(`/cv/master/${masterId}/toggles`),
+    renderOrder: () => request<string[]>("/cv/render-order"),
     listProfiles: (masterCvId: string) => request<CvProfile[]>(`/cv/profiles?masterCvId=${masterCvId}`),
     createProfile: (body: Omit<CvProfile, "id">) =>
       request<CvProfile>("/cv/profiles", { method: "POST", body: JSON.stringify(body) }),

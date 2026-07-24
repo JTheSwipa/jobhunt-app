@@ -24,7 +24,7 @@ const applicationSchema = z.object({
   atsPlatform: z.string().optional(),
   cvVersion: z.string().optional(),
   coverLetter: z.string().optional(),
-  status: z.enum(["applied", "interview", "offer", "rejected"]).default("applied"),
+  status: z.enum(["shortlist", "applied", "interview", "offer", "rejected"]).default("applied"),
   responseDate: z.coerce.date().optional(),
   responseType: z.string().optional(),
   notes: z.string().optional(),
@@ -40,7 +40,14 @@ trackerRouter.post("/", async (req, res) => {
 trackerRouter.put("/:id", async (req, res) => {
   const parsed = applicationSchema.partial().safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
-  const application = await prisma.application.update({ where: { id: req.params.id }, data: parsed.data });
+  // Reverting to "shortlist" without an explicit dateApplied clears any date
+  // left over from a prior "applied" state — otherwise the row shows a
+  // self-contradictory "not yet applied" status next to a real applied date.
+  const data: Omit<typeof parsed.data, "dateApplied"> & { dateApplied?: Date | null } = { ...parsed.data };
+  if (data.status === "shortlist" && data.dateApplied === undefined) {
+    data.dateApplied = null;
+  }
+  const application = await prisma.application.update({ where: { id: req.params.id }, data });
   res.json(application);
 });
 

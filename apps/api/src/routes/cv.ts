@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { z } from "zod";
+import { Prisma } from "@prisma/client";
 import { prisma } from "../db.js";
 import { applyVisibility, listToggleNodes } from "../cv/visibility.js";
 import { buildHtml, renderToPdf, DEFAULT_ORDER } from "../cv/render.js";
@@ -43,6 +44,15 @@ cvRouter.get("/master/:id/toggles", async (req, res) => {
   res.json(nodes);
 });
 
+// The section keys render.ts's PDF/preview dispatch table actually knows how
+// to draw, in render order. Single source of truth for both the default
+// order new profiles are created with and which sections the CV Editor
+// treats as reorderable — see CvEditor.tsx, which fetches this instead of
+// keeping its own copy of the list.
+cvRouter.get("/render-order", (_req, res) => {
+  res.json(DEFAULT_ORDER);
+});
+
 // --- Sector profiles --------------------------------------------------------
 
 cvRouter.get("/profiles", async (req, res) => {
@@ -66,10 +76,17 @@ cvRouter.post("/profiles", async (req, res) => {
   const parsed = profileSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
   const { masterCvId, name, visibility, order, style } = parsed.data;
-  const profile = await prisma.cvProfile.create({
-    data: { userId: USER_ID, masterCvId, name, visibility, order, style },
-  });
-  res.status(201).json(profile);
+  try {
+    const profile = await prisma.cvProfile.create({
+      data: { userId: USER_ID, masterCvId, name, visibility, order, style },
+    });
+    res.status(201).json(profile);
+  } catch (err) {
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
+      return res.status(409).json({ error: `a profile named "${name}" already exists for this master CV` });
+    }
+    throw err;
+  }
 });
 
 const profileUpdateSchema = profileSchema.partial().omit({ masterCvId: true });
@@ -77,11 +94,18 @@ const profileUpdateSchema = profileSchema.partial().omit({ masterCvId: true });
 cvRouter.put("/profiles/:id", async (req, res) => {
   const parsed = profileUpdateSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
-  const profile = await prisma.cvProfile.update({
-    where: { id: req.params.id },
-    data: parsed.data,
-  });
-  res.json(profile);
+  try {
+    const profile = await prisma.cvProfile.update({
+      where: { id: req.params.id },
+      data: parsed.data,
+    });
+    res.json(profile);
+  } catch (err) {
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
+      return res.status(409).json({ error: `a profile named "${parsed.data.name}" already exists for this master CV` });
+    }
+    throw err;
+  }
 });
 
 cvRouter.delete("/profiles/:id", async (req, res) => {
