@@ -61,6 +61,12 @@ uses — there is no code path from "model responds" to "profile changes."
 
 ## Architecture
 
+![Architecture](docs/architecture.png)
+
+_Editable source: [`docs/architecture.excalidraw`](docs/architecture.excalidraw)
+— open at [excalidraw.com](https://excalidraw.com) (File → Open) or with the
+Excalidraw VS Code extension._
+
 **Job sources are an adapter behind a small registry**
 (`apps/api/src/jobs/`), not a plugin system — just a `JobSource` interface
 (`id`, `displayName`, `search()`) and a lookup that tracks availability per
@@ -117,8 +123,12 @@ Run the visibility engine's test suite with `cd apps/api && npm test`.
 ## Status
 
 **Built**: the CV visibility engine and per-profile overrides, sector
-profiles, local AI tailoring (suggest-then-review), the Indeed adapter, and
-a basic application tracker.
+profiles with reorderable sections (drives both the editor and the PDF
+render order), local AI tailoring (suggest-then-review), the Indeed adapter,
+a design system ([`DESIGN.md`](DESIGN.md)), and an application tracker that's
+now linked to the job board — shortlisting or applying to a listing
+materializes a matching tracker row automatically, without ever clobbering
+progress you've already logged there (interview/offer/rejected).
 
 **Not built, on purpose:**
 - **LinkedIn adapter** — deferred. LinkedIn is aggressive about rate-limiting
@@ -133,5 +143,20 @@ a basic application tracker.
 
 ## Screenshots
 
-_placeholder — add screenshots of the CV editor (toggle + PDF preview) and
-job board here._
+**CV Editor** — sector profiles, AI tailoring suggestions, section reordering,
+and the override marker (the green left-edge bar + "overridden" tag) showing
+exactly which toggles this profile has explicitly set versus what it just
+inherits from the master. Screenshots use the fake `example_data/master_cv.json`
+fixture, not real CV content.
+
+![CV Editor](docs/screenshots/cv-editor.png)
+
+**Job Board** — Indeed results with per-listing status actions.
+
+![Job Board](docs/screenshots/job-board.png)
+
+**Tracker** — shortlisting or applying on the Job Board materializes (or
+updates) a matching row here automatically; manual entries work the same as
+before.
+
+![Tracker](docs/screenshots/tracker.png)

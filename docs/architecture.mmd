@@ -1,0 +1,34 @@
+graph LR
+  Browser["Browser: React + Vite<br/>CV Editor · Job Board · Tracker"]
+  Vite["Vite dev server<br/>proxies /api"]
+
+  subgraph API["API server (Express)"]
+    CvRoutes["cv.ts"]
+    JobsRoutes["jobs.ts"]
+    TrackerRoutes["tracker.ts"]
+    Visibility["visibility.ts + render.ts<br/>applies overrides, never<br/>mutates the master CV"]
+    Registry["job source registry"]
+  end
+
+  Indeed["Indeed adapter"]
+  CareerOS["CareerOS adapter<br/>disabled, returns 409"]
+  Postgres[("Postgres via Prisma<br/>MasterCv · CvProfile<br/>JobListing · Application")]
+  Ollama["Ollama: local LLM<br/>runs on host"]
+  Python["indeed_scan.py<br/>python-jobspy subprocess"]
+
+  Browser --> Vite
+  Vite --> CvRoutes
+  Vite --> JobsRoutes
+  Vite --> TrackerRoutes
+
+  CvRoutes --> Visibility --> Postgres
+  CvRoutes -->|"suggest: advisory only,<br/>never auto-applies"| Ollama
+
+  JobsRoutes --> Registry
+  Registry --> Indeed
+  Registry --> CareerOS
+  Indeed -->|execFile| Python
+  JobsRoutes -->|persist listings| Postgres
+  JobsRoutes -->|"shortlist/applied syncs to Application,<br/>never downgrades interview/offer/rejected"| Postgres
+
+  TrackerRoutes --> Postgres

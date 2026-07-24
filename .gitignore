@@ -8,3 +8,4 @@ build/
 apps/api/prisma/dev.db
 apps/api/generated/
 scripts/.venv/
+.gstack/
