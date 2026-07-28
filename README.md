@@ -52,6 +52,46 @@ its own suite alongside it ([cv](apps/api/src/routes/cv.test.ts),
 [tracker](apps/api/src/routes/tracker.test.ts)) covering validation, the job
 board ↔ tracker sync branches, and the error paths.
 
+### Hiding is not enough — a variant also carries its own pitch
+
+Hiding only differentiates a CV that has something to cut. On an early-career
+CV with two roles and two projects, every variant needs everything shown, and
+what actually changes between a bank and a seed-stage startup is the *pitch*.
+So a profile also carries `headline` and `summary` overrides:
+
+| value | meaning |
+|-------|---------|
+| `null` | inherit the master's value |
+| `""` | render nothing (the element is omitted, not left empty) |
+| a string | replace it for this profile only |
+
+These are typed columns rather than more keys in the `visibility` map, because
+boolean-presence-override and string-replacement are different semantics and
+the override grammar above is worth keeping narrow.
+
+Because overrides key on ids, `applyVisibility` **fails open**: an override
+whose target no longer exists does nothing, so an item you thought you had
+hidden renders anyway. That is the wrong direction to fail, so
+[`findOrphans`](apps/api/src/cv/visibility.ts) reports override keys that match
+nothing and the editor warns before you render. The editor also hashes each
+profile's resolved HTML, so two variants that produce a byte-identical document
+say so instead of quietly being the same CV under two names.
+
+### Every rendered CV leaves a receipt
+
+`POST /api/cv/profiles/:id/render` writes a `CvRender` row that snapshots the
+**resolved** CV — not a pointer at the profile it came from. A profile is
+mutable, so a foreign key would start lying the next time you edited it; the
+snapshot means "which CV did I send to Acme?" stays answerable after that
+profile is renamed or deleted. `Application.cvRenderId` links an application to
+its receipt, and the Tracker's "CV sent" column downloads the exact file.
+
+`resolvedData` + `order` + `style` regenerate the PDF deterministically, so the
+receipt's truth lives in Postgres and `pdfPath` is only a cache — if the file
+is gone, `GET /api/cv/renders/:id/pdf` re-renders it and checks the result
+against the stored `contentHash` before serving. Files are named per render
+(`Jezdic_CV_Corporate.pdf`), so renders no longer overwrite each other.
+
 ## AI tailoring — suggests, never applies
 
 The tailoring endpoint calls a local model (Ollama, `qwen2.5:7b` by default)
