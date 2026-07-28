@@ -14,23 +14,23 @@ datasource db {
 }
 
 model Application {
-  id          String    @id @default(cuid())
-  userId      String    @default("local")
-  dateApplied DateTime?
-  company     String
-  role        String
-  location    String?
-  source      String? // company_site | linkedin_easy_apply | platform | ...
-  foundVia    String? // gmail | linkedin_export | manual | ...
-  atsPlatform String?
-  cvVersion   String?
-  coverLetter String?
-  status      String    @default("applied") // shortlist | applied | interview | offer | rejected
+  id           String    @id @default(cuid())
+  userId       String    @default("local")
+  dateApplied  DateTime?
+  company      String
+  role         String
+  location     String?
+  source       String? // company_site | linkedin_easy_apply | platform | ...
+  foundVia     String? // gmail | linkedin_export | manual | ...
+  atsPlatform  String?
+  cvVersion    String?
+  coverLetter  String?
+  status       String    @default("applied") // shortlist | applied | interview | offer | rejected
   responseDate DateTime?
   responseType String?
-  notes       String?
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  notes        String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
 
   // Set when this row was materialized from a Job Board listing (shortlist
   // or applied). Optional + unique: manually-added tracker rows (the
@@ -38,22 +38,32 @@ model Application {
   jobListingId String?     @unique
   jobListing   JobListing? @relation(fields: [jobListingId], references: [id], onDelete: SetNull)
 
+  // Which CV actually went out. Points at an immutable CvRender snapshot, NOT
+  // at the mutable CvProfile it came from — editing "Corporate" next month must
+  // not silently rewrite what this row claims was sent. Deliberately NOT
+  // @unique (unlike jobListingId above): one rendered PDF legitimately goes to
+  // many companies. `cvVersion` above is the older free-text field, kept for
+  // now so its API contract and tests stay intact; see the design doc.
+  cvRenderId String?
+  cvRender   CvRender? @relation(fields: [cvRenderId], references: [id], onDelete: SetNull)
+
   @@index([userId])
+  @@index([cvRenderId])
 }
 
 model JobListing {
-  id         String   @id @default(cuid())
-  userId     String   @default("local")
-  firstSeen  DateTime @default(now())
-  status     String   @default("new") // new | shortlist | skip | applied
-  title      String
-  company    String
-  location   String?
-  country    String?
-  site       String // indeed | careeros | linkedin
-  datePosted DateTime?
-  jobUrl     String   @unique
-  notes      String?
+  id          String       @id @default(cuid())
+  userId      String       @default("local")
+  firstSeen   DateTime     @default(now())
+  status      String       @default("new") // new | shortlist | skip | applied
+  title       String
+  company     String
+  location    String?
+  country     String?
+  site        String // indeed | careeros | linkedin
+  datePosted  DateTime?
+  jobUrl      String       @unique
+  notes       String?
   application Application?
 
   @@index([userId])
@@ -68,6 +78,7 @@ model MasterCv {
   createdAt DateTime    @default(now())
   updatedAt DateTime    @updatedAt
   profiles  CvProfile[]
+  renders   CvRender[]
 
   @@unique([userId, name])
 }
@@ -81,8 +92,56 @@ model CvProfile {
   visibility Json // { [sectionId]: boolean, [itemId]: boolean } overrides
   order      Json // string[] of section keys, mirrors render_cv.py's --order
   style      String   @default("default") // default | compact
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+
+  // Per-profile pitch override. This is what makes two variants of a SMALL CV
+  // actually differ: with 2 jobs and 2 projects there is nothing meaningful to
+  // hide, but the headline and summary are the whole pitch. Typed columns rather
+  // than a generalized path-keyed override map on purpose — `visibility` has a
+  // stable key grammar and 43 tests, and generalizing it would cost an engine
+  // rewrite for no expressive gain here.
+  //   null => inherit the master's value
+  //   ""   => render nothing at all (buildHtml omits the element)
+  headline String?
+  summary  String?
+
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+  renders   CvRender[]
 
   @@unique([masterCvId, name])
+}
+
+/// An immutable receipt for one rendered CV. This is what makes "which variant
+/// did I send to Acme?" answerable: it snapshots the RESOLVED CvData rather than
+/// pointing at the CvProfile, because a profile is mutable and would rewrite
+/// history the next time it is edited. profileName is denormalized for the same
+/// reason — the trace has to survive both a rename and a delete.
+///
+/// resolvedData + order + style regenerate the PDF deterministically, so the
+/// receipt's truth lives in Postgres; pdfPath is a cache, and a missing file is
+/// recoverable (see GET /cv/renders/:id/pdf).
+model CvRender {
+  id          String     @id @default(cuid())
+  userId      String     @default("local")
+  cvProfileId String?
+  cvProfile   CvProfile? @relation(fields: [cvProfileId], references: [id], onDelete: SetNull)
+  profileName String // denormalized: survives profile rename AND deletion
+  masterCvId  String?
+  // SetNull, NOT the Cascade that CvProfile.masterCvId uses: cascading would
+  // destroy every receipt if a master-delete path is ever added. None exists
+  // today (PUT /cv/master upserts in place), so this is defence in depth.
+  masterCv    MasterCv?  @relation(fields: [masterCvId], references: [id], onDelete: SetNull)
+
+  resolvedData Json // the exact CvData that was rendered
+  order        Json
+  style        String
+  contentHash  String // sha256 of buildHtml(resolved, { order, style })
+  filename     String // human-facing, e.g. Jezdic_CV_Corporate.pdf
+  pdfPath      String
+  createdAt    DateTime @default(now())
+
+  applications Application[]
+
+  @@index([userId])
+  @@index([contentHash])
 }

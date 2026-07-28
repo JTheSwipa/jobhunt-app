@@ -27,6 +27,7 @@ export function makePrismaMock() {
       delete: vi.fn(),
     },
     masterCv: {
+      findMany: vi.fn(),
       findUnique: vi.fn(),
       findFirst: vi.fn(),
       upsert: vi.fn(),
@@ -37,6 +38,11 @@ export function makePrismaMock() {
       create: vi.fn(),
       update: vi.fn(),
       delete: vi.fn(),
+    },
+    cvRender: {
+      findMany: vi.fn(),
+      findFirst: vi.fn(),
+      create: vi.fn(),
     },
   };
 }

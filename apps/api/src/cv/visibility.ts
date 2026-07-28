@@ -16,6 +16,7 @@
 //                              across the whole document in the rxresume
 //                              export format, so no section prefix needed)
 
+import { DEFAULT_ORDER } from "./render.js";
 import type { CvCustomSection, CvData, CvSection } from "./schema.js";
 
 export type VisibilityMap = Record<string, boolean>;
@@ -107,6 +108,41 @@ export function listToggleNodes(data: CvData): ToggleNode[] {
   }
 
   return nodes;
+}
+
+/**
+ * Override keys in `overrides` that match nothing in `data`.
+ *
+ * This exists because applyVisibility FAILS OPEN by design (see the
+ * "silently ignored, not an error" test): an override whose target id no longer
+ * exists has no effect, so an item you believed you had hidden renders anyway.
+ * That is the dangerous direction to fail for a tool whose job is "do not put
+ * this in front of this company", and it happens for real whenever item ids
+ * change on a re-export from Reactive Resume.
+ *
+ * Deliberately a SEPARATE function rather than an extra field on
+ * applyVisibility's return value: applyVisibility returns CvData, every one of
+ * its tests consumes it as CvData, and cv.ts assigns it straight into
+ * `resolved.data`. Widening that return type would break all of them to add
+ * a diagnostic none of them asked for.
+ *
+ * The valid-key set is listToggleNodes' keys UNION every renderable section key.
+ * Both halves are needed. listToggleNodes handles the two special shapes
+ * ("section:profile", which is special-cased onto summary.hidden, and
+ * "section:custom:<id>", which lives in customSections) but it iterates
+ * data.sections and so emits nothing for a section that is absent from the CV
+ * JSON entirely. A CV with six empty sections may well be exported without
+ * them, and "section:awards" against such an export is not a stale id.
+ * Suppressing that case is safe: if the section isn't in the data, nothing
+ * renders for it, so there is no fail-open exposure — which is the only thing
+ * this check exists to catch.
+ */
+export function findOrphans(data: CvData, overrides: VisibilityMap): string[] {
+  const valid = new Set(listToggleNodes(data).map((n) => n.key));
+  for (const sectionKey of DEFAULT_ORDER) valid.add(`section:${sectionKey}`);
+  return Object.keys(overrides)
+    .filter((key) => !valid.has(key))
+    .sort();
 }
 
 /**

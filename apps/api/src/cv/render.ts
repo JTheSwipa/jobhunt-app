@@ -276,7 +276,13 @@ export function buildHtml(d: CvData, opts: RenderOptions = {}): string {
 
   const style = opts.style ?? "default";
   const name = style === "compact" ? e(basics.name) : e(basics.name).toUpperCase();
-  const body = [`<h1>${name}</h1>`, `<p class="subtitle">${e(basics.headline)}</p>`, `<p class="contact">${contact}</p>`];
+  const body = [`<h1>${name}</h1>`];
+  // A profile can override the headline to "" to mean "no subtitle at all"
+  // (null means inherit the master's). Emitting an empty <p class="subtitle">
+  // would leave its 4px bottom margin behind, so drop the element entirely —
+  // same convention secProfile already uses for an empty summary.
+  if (basics.headline) body.push(`<p class="subtitle">${e(basics.headline)}</p>`);
+  body.push(`<p class="contact">${contact}</p>`);
 
   const order = opts.order ?? DEFAULT_ORDER;
   for (const key of order) {
@@ -302,11 +308,20 @@ export interface RenderResult {
 }
 
 /**
+ * Where rendered artifacts land. Exported so callers serving a stored pdfPath
+ * back over HTTP can assert the path is inside this directory instead of
+ * trusting a value out of the database.
+ */
+export function outputDir(): string {
+  return path.join(process.env.HOME ?? ".", "jobhunt-cv-output");
+}
+
+/**
  * Chromium (snap-confined, same as the Python original) refuses to write
  * outside $HOME — outdir must resolve to a path under $HOME.
  */
 export async function renderToPdf(d: CvData, outBasename: string, opts: RenderOptions & { outdir?: string } = {}): Promise<RenderResult> {
-  const outdir = opts.outdir ?? path.join(process.env.HOME ?? ".", "jobhunt-cv-output");
+  const outdir = opts.outdir ?? outputDir();
   await mkdir(outdir, { recursive: true });
 
   const htmlDoc = buildHtml(d, opts);

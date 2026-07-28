@@ -45,9 +45,15 @@ describe("GET /api/tracker", () => {
     const res = await client.request("GET", "/api/tracker");
 
     expect(res.status).toBe(200);
+    // The include is what lets the Tracker show which CV actually went out.
     expect(db.application.findMany).toHaveBeenCalledWith({
       where: { userId: "local" },
       orderBy: { dateApplied: "desc" },
+      include: {
+        cvRender: {
+          select: { id: true, profileName: true, filename: true, createdAt: true },
+        },
+      },
     });
   });
 });
@@ -103,6 +109,28 @@ describe("POST /api/tracker", () => {
       cvVersion: "Corporate",
       notes: "referred by Sam",
     });
+  });
+
+  it("attaches the CV receipt that actually went out", async () => {
+    db.application.create.mockResolvedValue(makeRow());
+
+    await client.request("POST", "/api/tracker", {
+      company: "Acme",
+      role: "Data Engineer",
+      cvRenderId: "render-1",
+    });
+
+    expect(db.application.create.mock.calls[0][0].data).toMatchObject({ cvRenderId: "render-1" });
+  });
+
+  it("lets an application be detached from its receipt again", async () => {
+    // null, not absent: absent means "leave it alone", so clearing the link
+    // needs an explicit null to reach Prisma.
+    db.application.update.mockResolvedValue(makeRow());
+
+    await client.request("PUT", "/api/tracker/app-1", { cvRenderId: null });
+
+    expect(db.application.update.mock.calls[0][0].data).toMatchObject({ cvRenderId: null });
   });
 
   it.each([

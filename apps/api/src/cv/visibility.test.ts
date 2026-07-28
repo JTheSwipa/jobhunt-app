@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyVisibility, listToggleNodes, type VisibilityMap } from "./visibility.js";
+import { applyVisibility, findOrphans, listToggleNodes, type VisibilityMap } from "./visibility.js";
 import { SECTION_KEYS, type CvData } from "./schema.js";
 import { DEFAULT_ORDER } from "./render.js";
 
@@ -381,5 +381,73 @@ describe("malformed / unknown input", () => {
     const nodes = listToggleNodes(cv);
     expect(nodes.find((n) => n.key === "section:skills")?.hidden).toBe(false);
     expect(nodes.find((n) => n.key === `item:${cv.sections.skills.items[0].id}`)?.hidden).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// findOrphans — the counterweight to applyVisibility failing open.
+//
+// applyVisibility ignoring an override that matches nothing is deliberate and
+// tested above. The danger is the direction of that failure: an item you hid
+// renders again, silently, the moment its id changes upstream. These tests pin
+// which keys count as stale and, just as importantly, which do NOT — a false
+// positive here trains you to ignore the warning.
+// ---------------------------------------------------------------------------
+
+describe("findOrphans", () => {
+  it("returns nothing for an empty override map", () => {
+    expect(findOrphans(makeMasterCv(), {})).toEqual([]);
+  });
+
+  it("reports an item id the master no longer has", () => {
+    const orphans = findOrphans(makeMasterCv(), { "item:exp-1": true, "item:exp-deleted": true });
+    expect(orphans).toEqual(["item:exp-deleted"]);
+  });
+
+  it("reports a section key that is not renderable at all", () => {
+    expect(findOrphans(makeMasterCv(), { "section:doesNotExist": true })).toEqual(["section:doesNotExist"]);
+  });
+
+  it("sorts its output, so the warning is stable between calls", () => {
+    const orphans = findOrphans(makeMasterCv(), { "item:zzz": true, "item:aaa": true, "section:nope": true });
+    expect(orphans).toEqual(["item:aaa", "item:zzz", "section:nope"]);
+  });
+
+  // The three false-positive classes. Each of these keys is legitimate, and
+  // flagging any of them would make the feature noise.
+  it("does not flag section:profile, which is special-cased onto summary.hidden", () => {
+    expect(findOrphans(makeMasterCv(), { "section:profile": true })).toEqual([]);
+  });
+
+  it("does not flag custom-section keys, which live outside data.sections", () => {
+    const overrides = { "section:custom:custom-academic": true, "item:acad-1": true };
+    expect(findOrphans(makeMasterCv(), overrides)).toEqual([]);
+  });
+
+  it("does not flag a renderable section that the CV export omitted entirely", () => {
+    // Six sections sit at zero items in the real CV, and an exporter may drop
+    // them. "section:awards" against such an export is not a stale id, and
+    // suppressing it is safe: an absent section renders nothing, so there is no
+    // fail-open exposure — the only thing this check exists to catch.
+    const cv = makeMasterCv();
+    delete (cv.sections as Record<string, unknown>).awards;
+
+    expect(findOrphans(cv, { "section:awards": true })).toEqual([]);
+  });
+
+  it("still flags a stale ITEM id from a section the export omitted", () => {
+    // The section key is forgiven; an item inside it is not, because an item id
+    // can only be satisfied by data that is actually present.
+    const cv = makeMasterCv();
+    delete (cv.sections as Record<string, unknown>).awards;
+
+    expect(findOrphans(cv, { "item:award-1": true })).toEqual(["item:award-1"]);
+  });
+
+  it("does not mutate the CV it inspects", () => {
+    const cv = makeMasterCv();
+    const before = structuredClone(cv);
+    findOrphans(cv, { "item:exp-1": true, "item:gone": true });
+    expect(cv).toEqual(before);
   });
 });

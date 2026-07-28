@@ -89,6 +89,8 @@ function makeProfileRow(over: Record<string, unknown> = {}) {
     visibility: {},
     order: DEFAULT_ORDER,
     style: "default",
+    headline: null, // null => inherit the master's
+    summary: null,
     ...over,
   };
 }
@@ -217,6 +219,7 @@ describe("GET /api/cv/render-order", () => {
 describe("GET /api/cv/profiles", () => {
   it("returns every profile when no master is specified", async () => {
     db.cvProfile.findMany.mockResolvedValue([makeProfileRow()]);
+    db.masterCv.findMany.mockResolvedValue([makeMasterRow()]);
 
     const res = await client.request("GET", "/api/cv/profiles");
 
@@ -225,6 +228,57 @@ describe("GET /api/cv/profiles", () => {
       where: { userId: "local" },
       orderBy: { createdAt: "asc" },
     });
+  });
+
+  it("carries a contentHash so the editor can spot two variants that render identically", async () => {
+    // Two profiles, different names, identical everything-that-renders. This is
+    // the real dead state this feature exists to surface: "Corporate" and
+    // "Full CV" both with zero overrides produce the same document.
+    db.cvProfile.findMany.mockResolvedValue([
+      makeProfileRow({ id: "p-1", name: "Corporate" }),
+      makeProfileRow({ id: "p-2", name: "Full CV" }),
+    ]);
+    db.masterCv.findMany.mockResolvedValue([makeMasterRow()]);
+
+    const res = await client.request("GET", "/api/cv/profiles");
+
+    expect(res.status).toBe(200);
+    expect(res.body[0].contentHash).toEqual(expect.stringMatching(/^[0-9a-f]{64}$/));
+    expect(res.body[0].contentHash).toBe(res.body[1].contentHash);
+  });
+
+  it("gives two profiles different hashes once their pitch differs", async () => {
+    db.cvProfile.findMany.mockResolvedValue([
+      makeProfileRow({ id: "p-1", headline: "Corporate analytics" }),
+      makeProfileRow({ id: "p-2", headline: "Ships AI products end to end" }),
+    ]);
+    db.masterCv.findMany.mockResolvedValue([makeMasterRow()]);
+
+    const res = await client.request("GET", "/api/cv/profiles");
+
+    expect(res.body[0].contentHash).not.toBe(res.body[1].contentHash);
+  });
+
+  it("reports override keys the master no longer has, so a fail-open hide is visible", async () => {
+    db.cvProfile.findMany.mockResolvedValue([
+      makeProfileRow({ visibility: { "item:exp-1": true, "item:deleted-in-rxresume": true } }),
+    ]);
+    db.masterCv.findMany.mockResolvedValue([makeMasterRow()]);
+
+    const res = await client.request("GET", "/api/cv/profiles");
+
+    expect(res.body[0].orphans).toEqual(["item:deleted-in-rxresume"]);
+  });
+
+  it("still lists a profile whose master CV has vanished, without derived state", async () => {
+    db.cvProfile.findMany.mockResolvedValue([makeProfileRow()]);
+    db.masterCv.findMany.mockResolvedValue([]);
+
+    const res = await client.request("GET", "/api/cv/profiles");
+
+    expect(res.status).toBe(200);
+    expect(res.body[0].contentHash).toBeNull();
+    expect(res.body[0].orphans).toEqual([]);
   });
 
   it("narrows to one master CV when asked", async () => {
@@ -486,15 +540,236 @@ describe("POST /api/cv/profiles/:id/render", () => {
   it("renders a PDF with the profile's order and style", async () => {
     db.cvProfile.findFirst.mockResolvedValue(makeProfileRow({ style: "compact", order: ["profile"] }));
     db.masterCv.findUnique.mockResolvedValue(makeMasterRow());
-    renderPdf.mockResolvedValue({ path: "/tmp/cv-profile-1.pdf" } as never);
+    renderPdf.mockResolvedValue({ htmlPath: "/tmp/x.html", pdfPath: "/tmp/x.pdf" });
+    db.cvRender.create.mockImplementation(async ({ data }: { data: Record<string, unknown> }) => data);
 
     const res = await client.request("POST", "/api/cv/profiles/profile-1/render");
 
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({ path: "/tmp/cv-profile-1.pdf" });
-    expect(renderPdf).toHaveBeenCalledWith(expect.anything(), "cv-profile-1", {
+    expect(res.body).toMatchObject({ pdfPath: "/tmp/x.pdf", filename: "Rivera_CV_Corporate.pdf" });
+    // The basename is now the render id, not the profile id. Keying it on the
+    // profile meant every render silently overwrote the last one.
+    expect(renderPdf).toHaveBeenCalledWith(expect.anything(), `cv-${res.body.id}`, {
       order: ["profile"],
       style: "compact",
+    });
+    expect(res.body.id).not.toBe("profile-1");
+  });
+
+  it("writes an immutable receipt snapshotting the resolved CV, not a pointer at the profile", async () => {
+    db.cvProfile.findFirst.mockResolvedValue(
+      makeProfileRow({ headline: "Corporate analytics", visibility: { "item:exp-1": true } }),
+    );
+    db.masterCv.findUnique.mockResolvedValue(makeMasterRow());
+    renderPdf.mockResolvedValue({ htmlPath: "/tmp/x.html", pdfPath: "/tmp/x.pdf" });
+    db.cvRender.create.mockImplementation(async ({ data }: { data: Record<string, unknown> }) => data);
+
+    await client.request("POST", "/api/cv/profiles/profile-1/render");
+
+    const written = db.cvRender.create.mock.calls[0][0].data;
+    expect(written.cvProfileId).toBe("profile-1");
+    // Denormalized, so the trace survives a rename or a delete of the profile.
+    expect(written.profileName).toBe("Corporate");
+    expect(written.contentHash).toEqual(expect.stringMatching(/^[0-9a-f]{64}$/));
+    expect(written.filename).toBe("Rivera_CV_Corporate.pdf");
+    // The snapshot carries the applied pitch and the applied hide, so the
+    // receipt reproduces the document even after the profile changes.
+    const snapshot = written.resolvedData as CvData;
+    expect(snapshot.basics.headline).toBe("Corporate analytics");
+    expect(snapshot.sections.experience.items[0].hidden).toBe(true);
+    // ...and the master is untouched.
+    expect(makeCv().basics.headline).toBe("Data & AI");
+  });
+
+  it("does not write a receipt when the render itself fails", async () => {
+    db.cvProfile.findFirst.mockResolvedValue(makeProfileRow());
+    db.masterCv.findUnique.mockResolvedValue(makeMasterRow());
+    renderPdf.mockRejectedValue(new Error("chromium exploded"));
+
+    const res = await client.request("POST", "/api/cv/profiles/profile-1/render");
+
+    expect(res.status).toBe(500);
+    expect(db.cvRender.create).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The per-profile pitch. This is the whole point of the feature for a CV with
+// 2 jobs and 2 projects: there is nothing meaningful to hide, so what makes
+// "Corporate" differ from "Startup" is the headline and the summary.
+//
+// Three states, and they are easy to collapse into two by accident:
+//   absent from the PUT body => leave unchanged
+//   null                     => inherit the master's value
+//   ""                       => render nothing at all
+// ---------------------------------------------------------------------------
+
+describe("per-profile pitch override", () => {
+  async function preview(over: Record<string, unknown>) {
+    db.cvProfile.findFirst.mockResolvedValue(makeProfileRow(over));
+    db.masterCv.findUnique.mockResolvedValue(makeMasterRow());
+    return client.request("GET", "/api/cv/profiles/profile-1/preview");
+  }
+
+  it("inherits the master headline and summary when both are null", async () => {
+    const res = await preview({ headline: null, summary: null });
+
+    expect(res.body).toContain("Data &amp; AI");
+    expect(res.body).toContain("Profile summary.");
+  });
+
+  it("replaces the headline for this profile only, leaving the master alone", async () => {
+    const res = await preview({ headline: "Ships AI products end to end" });
+
+    expect(res.body).toContain("Ships AI products end to end");
+    expect(res.body).not.toContain("Data &amp; AI");
+    // The master row object handed to the route is untouched, which is what
+    // lets one master back many variants.
+    expect(makeCv().basics.headline).toBe("Data & AI");
+  });
+
+  it("replaces the summary for this profile only", async () => {
+    const res = await preview({ summary: "<p>Corporate framing.</p>" });
+
+    expect(res.body).toContain("Corporate framing.");
+    expect(res.body).not.toContain("Profile summary.");
+  });
+
+  it("renders no subtitle element at all for an empty-string headline", async () => {
+    const res = await preview({ headline: "" });
+
+    // Not merely absent text — the element itself is gone, so its bottom
+    // margin does not leave a gap under the name.
+    expect(res.body).not.toContain('class="subtitle"');
+    expect(res.body).toContain("ALEX RIVERA");
+  });
+
+  it("renders no Profile block at all for an empty-string summary", async () => {
+    const res = await preview({ summary: "" });
+
+    expect(res.body).not.toContain("<h2>Profile</h2>");
+  });
+
+  it("accepts null through PUT, which is how a profile is reset to inherit", async () => {
+    db.cvProfile.update.mockResolvedValue(makeProfileRow({ headline: null }));
+
+    const res = await client.request("PUT", "/api/cv/profiles/profile-1", { headline: null });
+
+    expect(res.status).toBe(200);
+    expect(db.cvProfile.update.mock.calls[0][0].data).toEqual({ headline: null });
+  });
+
+  it("accepts the empty string through PUT rather than rejecting it as too short", async () => {
+    // A .min(1) here — copied by reflex from `name` — would collapse "render
+    // nothing" into "inherit the master".
+    db.cvProfile.update.mockResolvedValue(makeProfileRow({ headline: "" }));
+
+    const res = await client.request("PUT", "/api/cv/profiles/profile-1", { headline: "", summary: "" });
+
+    expect(res.status).toBe(200);
+    expect(db.cvProfile.update.mock.calls[0][0].data).toEqual({ headline: "", summary: "" });
+  });
+
+  it("leaves the pitch untouched when the PUT body omits it", async () => {
+    db.cvProfile.update.mockResolvedValue(makeProfileRow());
+
+    await client.request("PUT", "/api/cv/profiles/profile-1", { name: "Renamed" });
+
+    expect(db.cvProfile.update.mock.calls[0][0].data).toEqual({ name: "Renamed" });
+  });
+
+  it("carries the pitch through profile creation", async () => {
+    db.cvProfile.create.mockResolvedValue(makeProfileRow());
+
+    await client.request("POST", "/api/cv/profiles", {
+      masterCvId: "master-1",
+      name: "Startup",
+      headline: "Ships AI products end to end",
+    });
+
+    expect(db.cvProfile.create.mock.calls[0][0].data).toMatchObject({
+      headline: "Ships AI products end to end",
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Render receipts. The trace has to stay true after the profile it came from is
+// renamed or deleted, which is why these read profileName off the render row
+// rather than joining back to CvProfile.
+// ---------------------------------------------------------------------------
+
+describe("GET /api/cv/renders", () => {
+  it("lists recent receipts, newest first", async () => {
+    db.cvRender.findMany.mockResolvedValue([
+      { id: "r-2", profileName: "Startup", filename: "Rivera_CV_Startup.pdf" },
+      { id: "r-1", profileName: "Corporate", filename: "Rivera_CV_Corporate.pdf" },
+    ]);
+
+    const res = await client.request("GET", "/api/cv/renders");
+
+    expect(res.status).toBe(200);
+    expect(res.body.map((r: { id: string }) => r.id)).toEqual(["r-2", "r-1"]);
+    expect(db.cvRender.findMany.mock.calls[0][0].orderBy).toEqual({ createdAt: "desc" });
+  });
+});
+
+describe("GET /api/cv/renders/:id/pdf", () => {
+  function makeRenderRow(over: Record<string, unknown> = {}) {
+    return {
+      id: "r-1",
+      userId: "local",
+      cvProfileId: "profile-1",
+      profileName: "Corporate",
+      masterCvId: "master-1",
+      resolvedData: makeCv(),
+      order: DEFAULT_ORDER,
+      style: "default",
+      contentHash: "deadbeef",
+      filename: "Rivera_CV_Corporate.pdf",
+      pdfPath: "/tmp/does-not-exist/cv-r-1.pdf",
+      ...over,
+    };
+  }
+
+  it("404s an unknown receipt", async () => {
+    db.cvRender.findFirst.mockResolvedValue(null);
+
+    const res = await client.request("GET", "/api/cv/renders/ghost/pdf");
+
+    expect(res.status).toBe(404);
+  });
+
+  it("refuses to serve a receipt it can no longer reproduce", async () => {
+    // The stored file is gone AND re-rendering produces different bytes than
+    // the receipt recorded. Handing over a document that is not what was sent
+    // would be worse than an error, so this is a 409, not a best-effort PDF.
+    db.cvRender.findFirst.mockResolvedValue(makeRenderRow({ contentHash: "stale-hash-from-an-older-renderer" }));
+
+    const res = await client.request("GET", "/api/cv/renders/r-1/pdf");
+
+    expect(res.status).toBe(409);
+    expect(renderPdf).not.toHaveBeenCalled();
+  });
+
+  it("re-renders from the snapshot when the archived file has gone missing", async () => {
+    // pdfPath is a cache; resolvedData in Postgres is the source of truth. A
+    // file cleaned up or never backed up alongside the DB must not lose the
+    // receipt. The hash has to match first, so compute the real one.
+    const { createHash } = await import("node:crypto");
+    const { buildHtml } = await import("../cv/render.js");
+    const data = makeCv();
+    const hash = createHash("sha256")
+      .update(buildHtml(data, { order: DEFAULT_ORDER, style: "default" }), "utf8")
+      .digest("hex");
+    db.cvRender.findFirst.mockResolvedValue(makeRenderRow({ contentHash: hash }));
+    renderPdf.mockResolvedValue({ htmlPath: "/tmp/x.html", pdfPath: "/tmp/definitely-not-here.pdf" });
+
+    await client.request("GET", "/api/cv/renders/r-1/pdf");
+
+    expect(renderPdf).toHaveBeenCalledWith(expect.anything(), "cv-r-1", {
+      order: DEFAULT_ORDER,
+      style: "default",
     });
   });
 
