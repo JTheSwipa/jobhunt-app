@@ -118,13 +118,22 @@ export default function CvEditor() {
 
   const selectedProfile = profiles.find((p) => p.id === selectedId) ?? null;
 
+  // Re-syncs local edit state from the server's copy. Runs on profile identity
+  // too, not just id, so a save/refresh pulls the persisted values back in.
   useEffect(() => {
     setVisibility(selectedProfile?.visibility ?? {});
     setOrder(selectedProfile?.order?.length ? selectedProfile.order : renderSectionKeys);
     setHeadline(selectedProfile?.headline ?? null);
     setSummary(selectedProfile?.summary ?? null);
-    setLastRender(null);
   }, [selectedProfile, renderSectionKeys]);
+
+  // Keyed on the id, deliberately NOT on the profile object: rendering refreshes
+  // the profile list (to pick up the new contentHash), which hands back a new
+  // object for the same profile. Folding this into the effect above meant that
+  // refresh wiped the download link the render had just produced.
+  useEffect(() => {
+    setLastRender(null);
+  }, [selectedId]);
 
   // Unsaved-work guard. The effect above reloads local edit state from whichever
   // profile is selected, so switching the dropdown used to silently discard
@@ -459,7 +468,10 @@ export default function CvEditor() {
           )}
           {orphans.length > 0 && (
             <div className="alert alert-error" style={{ marginBottom: 16 }}>
-              <strong>{orphans.length} override{orphans.length === 1 ? "" : "s"} point at content this CV no longer has.</strong>{" "}
+              <strong>
+                {orphans.length} override{orphans.length === 1 ? " points" : "s point"} at content this CV no longer
+                has.
+              </strong>{" "}
               They do nothing, which means anything you hid through them is being shown again. Re-tailor those
               toggles, or clear them.
               <div style={{ fontFamily: "var(--font-code, monospace)", fontSize: "0.8rem", marginTop: 6 }}>
