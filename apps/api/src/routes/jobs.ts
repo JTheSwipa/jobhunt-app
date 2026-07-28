@@ -1,11 +1,11 @@
-import { Router } from "express";
 import { z } from "zod";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../db.js";
+import { asyncRouter } from "../http/asyncRouter.js";
 import { getJobSourceEntry } from "../jobs/registry.js";
 import type { Listing } from "../jobs/base.js";
 
-export const jobsRouter = Router();
+export const jobsRouter = asyncRouter();
 
 const USER_ID = "local";
 

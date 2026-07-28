@@ -1,8 +1,8 @@
-import { Router } from "express";
 import { z } from "zod";
 import { prisma } from "../db.js";
+import { asyncRouter } from "../http/asyncRouter.js";
 
-export const trackerRouter = Router();
+export const trackerRouter = asyncRouter();
 
 const USER_ID = "local";
 

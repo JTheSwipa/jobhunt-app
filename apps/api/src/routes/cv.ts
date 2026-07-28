@@ -1,13 +1,13 @@
-import { Router } from "express";
 import { z } from "zod";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../db.js";
+import { asyncRouter } from "../http/asyncRouter.js";
 import { applyVisibility, listToggleNodes } from "../cv/visibility.js";
 import { buildHtml, renderToPdf, DEFAULT_ORDER } from "../cv/render.js";
 import type { CvData } from "../cv/schema.js";
 import { ollamaProvider } from "../ai/ollamaProvider.js";
 
-export const cvRouter = Router();
+export const cvRouter = asyncRouter();
 
 const USER_ID = "local"; // single-user MVP — see plan Phase 3 for the multi-user path
 
