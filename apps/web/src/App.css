@@ -271,3 +271,24 @@
   border-color: var(--color-info);
   color: var(--color-info);
 }
+
+/* Used for "this variant renders an identical document" — a real problem, but
+   one where nothing is broken and no data is at risk, so it sits below
+   alert-error in the hierarchy. Orphaned overrides stay alert-error: those
+   silently ship content you believed was hidden. */
+.alert-warning {
+  background: color-mix(in srgb, var(--color-warning) 12%, var(--bg-subtle));
+  border-color: var(--color-warning);
+  color: var(--color-warning);
+}
+
+/* label scale from DESIGN.md: 0.75rem / 600 / uppercase */
+.field-label {
+  display: block;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  margin-bottom: 4px;
+}

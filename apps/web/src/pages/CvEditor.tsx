@@ -67,8 +67,14 @@ export default function CvEditor() {
   // source of truth, see cv.ts's /render-order) rather than kept as a
   // second hardcoded copy here that could drift from the real renderer.
   const [renderSectionKeys, setRenderSectionKeys] = useState<string[]>([]);
+  // The per-profile pitch. `null` means "inherit the master", "" means "render
+  // nothing" — kept as `string | null` rather than "" so those two stay
+  // distinguishable all the way to the API.
+  const [headline, setHeadline] = useState<string | null>(null);
+  const [summary, setSummary] = useState<string | null>(null);
   const [newProfileName, setNewProfileName] = useState("");
   const [profileError, setProfileError] = useState<string | null>(null);
+  const [lastRender, setLastRender] = useState<{ id: string; filename: string } | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
@@ -115,7 +121,53 @@ export default function CvEditor() {
   useEffect(() => {
     setVisibility(selectedProfile?.visibility ?? {});
     setOrder(selectedProfile?.order?.length ? selectedProfile.order : renderSectionKeys);
+    setHeadline(selectedProfile?.headline ?? null);
+    setSummary(selectedProfile?.summary ?? null);
+    setLastRender(null);
   }, [selectedProfile, renderSectionKeys]);
+
+  // Unsaved-work guard. The effect above reloads local edit state from whichever
+  // profile is selected, so switching the dropdown used to silently discard
+  // every toggle you had not saved yet. Comparing against the persisted row is
+  // more honest than a boolean flag: undo your own change back to the saved
+  // value and you are genuinely clean again.
+  const isDirty = useMemo(() => {
+    if (!selectedProfile) return false;
+    const sameVisibility =
+      JSON.stringify(visibility) === JSON.stringify(selectedProfile.visibility ?? {});
+    const savedOrder = selectedProfile.order?.length ? selectedProfile.order : renderSectionKeys;
+    const sameOrder = JSON.stringify(order) === JSON.stringify(savedOrder);
+    const samePitch =
+      (headline ?? null) === (selectedProfile.headline ?? null) &&
+      (summary ?? null) === (selectedProfile.summary ?? null);
+    return !(sameVisibility && sameOrder && samePitch);
+  }, [selectedProfile, visibility, order, headline, summary, renderSectionKeys]);
+
+  function selectProfile(id: string | null) {
+    if (isDirty && !window.confirm("You have unsaved changes to this profile. Discard them?")) return;
+    setSelectedId(id);
+  }
+
+  // Warn before a browser-level navigation away, for the same reason.
+  useEffect(() => {
+    if (!isDirty) return;
+    const onBeforeUnload = (e: BeforeUnloadEvent) => e.preventDefault();
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, [isDirty]);
+
+  // Two profiles whose resolved documents hash identically are the same CV under
+  // different names. This is the state the whole variant feature can silently sit
+  // in — the hash comes from the server, since it needs the master CV and the
+  // renderer.
+  const identicalTwins = useMemo(() => {
+    if (!selectedProfile?.contentHash) return [];
+    return profiles
+      .filter((p) => p.id !== selectedProfile.id && p.contentHash === selectedProfile.contentHash)
+      .map((p) => p.name);
+  }, [profiles, selectedProfile]);
+
+  const orphans = selectedProfile?.orphans ?? [];
 
   const grouped = useMemo(() => {
     const bySection = new Map<string, SectionGroup>();
@@ -221,7 +273,11 @@ export default function CvEditor() {
     }
   }
 
-  async function createProfile() {
+  // `from` clones an existing profile's overrides, order and pitch. Starting
+  // every variant from an empty override map meant a near-identical variant
+  // required redoing every toggle by hand, which is the reason two profiles
+  // here ended up with no overrides at all.
+  async function createProfile(from?: CvProfile) {
     if (!master || !newProfileName.trim()) return;
     setProfileError(null);
     try {
@@ -229,13 +285,15 @@ export default function CvEditor() {
       // effect that populates it fires in parallel with loadMaster) — an
       // empty order would persist as an empty array, not fall back to the
       // backend's default, and render zero sections in that profile's PDF.
-      const order = renderSectionKeys.length ? renderSectionKeys : await api.cv.renderOrder();
+      const fallbackOrder = renderSectionKeys.length ? renderSectionKeys : await api.cv.renderOrder();
       const profile = await api.cv.createProfile({
         masterCvId: master.id,
         name: newProfileName.trim(),
-        visibility: {},
-        order,
-        style: "default",
+        visibility: from ? { ...from.visibility } : {},
+        order: from?.order?.length ? [...from.order] : fallbackOrder,
+        style: from?.style ?? "default",
+        headline: from?.headline ?? null,
+        summary: from?.summary ?? null,
       });
       setNewProfileName("");
       setProfiles(await api.cv.listProfiles(master.id));
@@ -249,7 +307,7 @@ export default function CvEditor() {
     if (!selectedProfile) return;
     setSaveError(null);
     try {
-      await api.cv.updateProfile(selectedProfile.id, { visibility, order });
+      await api.cv.updateProfile(selectedProfile.id, { visibility, order, headline, summary });
       if (master) setProfiles(await api.cv.listProfiles(master.id));
       setPreviewNonce((n) => n + 1);
     } catch (err) {
@@ -260,9 +318,14 @@ export default function CvEditor() {
   async function renderPdf() {
     if (!selectedProfile) return;
     setRenderMsg("Rendering…");
+    setLastRender(null);
     try {
       const result = await api.cv.render(selectedProfile.id);
-      setRenderMsg(`Rendered: ${result.pdfPath}`);
+      // The old code printed the server filesystem path here, which the user
+      // could do nothing with. Hand back a real download instead.
+      setLastRender({ id: result.id, filename: result.filename });
+      setRenderMsg(null);
+      if (master) setProfiles(await api.cv.listProfiles(master.id));
     } catch (err) {
       setRenderMsg(err instanceof Error ? err.message : String(err));
     }
@@ -317,9 +380,16 @@ export default function CvEditor() {
 
   if (!master) return <p>Loading…</p>;
 
-  const masterData = master.data && typeof master.data === "object" ? (master.data as { basics?: { name?: unknown } }) : {};
+  const masterData =
+    master.data && typeof master.data === "object"
+      ? (master.data as { basics?: { name?: unknown; headline?: unknown }; summary?: { content?: unknown } })
+      : {};
   const masterNameRaw = masterData.basics?.name;
   const masterName = (typeof masterNameRaw === "string" ? masterNameRaw.trim() : "") || "Untitled CV";
+  // Shown as placeholder text in the pitch fields, so "inherit" is visible
+  // rather than just implied by an empty box.
+  const masterHeadline = typeof masterData.basics?.headline === "string" ? masterData.basics.headline : "";
+  const masterSummary = typeof masterData.summary?.content === "string" ? masterData.summary.content.replace(/<[^>]*>/g, "").trim() : "";
 
   return (
     <section>
@@ -349,7 +419,7 @@ export default function CvEditor() {
         <select
           className="profile-select"
           value={selectedId ?? ""}
-          onChange={(e) => setSelectedId(e.target.value || null)}
+          onChange={(e) => selectProfile(e.target.value || null)}
         >
           <option value="">— select a sector profile —</option>
           {profiles.map((p) => (
@@ -359,14 +429,75 @@ export default function CvEditor() {
           ))}
         </select>
         <input placeholder="New profile name (e.g. Corporate)" value={newProfileName} onChange={(e) => setNewProfileName(e.target.value)} />
-        <button type="button" className="btn btn-ghost" onClick={createProfile}>
-          Create profile
+        <button type="button" className="btn btn-ghost" onClick={() => createProfile()} disabled={!newProfileName.trim()}>
+          Create empty
+        </button>
+        <button
+          type="button"
+          className="btn btn-ghost"
+          onClick={() => selectedProfile && createProfile(selectedProfile)}
+          disabled={!newProfileName.trim() || !selectedProfile}
+          title={
+            selectedProfile
+              ? `Copy ${selectedProfile.name}'s toggles, order and pitch into the new profile`
+              : "Select a profile to copy from"
+          }
+        >
+          Duplicate selected
         </button>
       </div>
       {profileError && <div className="alert alert-error" style={{ marginBottom: 16 }}>{profileError}</div>}
 
       {selectedProfile ? (
         <>
+          {identicalTwins.length > 0 && (
+            <div className="alert alert-warning" style={{ marginBottom: 16 }}>
+              <strong>This variant is not actually different.</strong> It renders a document identical to{" "}
+              {identicalTwins.join(", ")}. Give it its own headline or summary below, or hide something, or it is
+              the same CV under another name.
+            </div>
+          )}
+          {orphans.length > 0 && (
+            <div className="alert alert-error" style={{ marginBottom: 16 }}>
+              <strong>{orphans.length} override{orphans.length === 1 ? "" : "s"} point at content this CV no longer has.</strong>{" "}
+              They do nothing, which means anything you hid through them is being shown again. Re-tailor those
+              toggles, or clear them.
+              <div style={{ fontFamily: "var(--font-code, monospace)", fontSize: "0.8rem", marginTop: 6 }}>
+                {orphans.join(", ")}
+              </div>
+            </div>
+          )}
+
+          {/* The pitch. For a CV with two jobs and two projects there is almost
+              nothing worth hiding, so this — not the checkboxes below — is what
+              makes a Corporate variant differ from a Startup one. */}
+          <div className="panel" style={{ marginBottom: 16 }}>
+            <div className="row" style={{ justifyContent: "space-between", alignItems: "baseline", marginBottom: 8 }}>
+              <strong>This profile's pitch</strong>
+              <span style={{ color: "var(--muted)", fontSize: "0.85rem" }}>
+                Leave blank to inherit the master CV
+              </span>
+            </div>
+            <label style={{ display: "block", marginBottom: 12 }}>
+              <span className="field-label">Headline</span>
+              <input
+                style={{ width: "100%" }}
+                placeholder={masterHeadline || "e.g. Data Science & Business Analytics"}
+                value={headline ?? ""}
+                onChange={(e) => setHeadline(e.target.value === "" ? null : e.target.value)}
+              />
+            </label>
+            <label style={{ display: "block" }}>
+              <span className="field-label">Summary</span>
+              <textarea
+                style={{ width: "100%", minHeight: 90, resize: "vertical" }}
+                placeholder={masterSummary || "The Profile block at the top of the CV. HTML is allowed."}
+                value={summary ?? ""}
+                onChange={(e) => setSummary(e.target.value === "" ? null : e.target.value)}
+              />
+            </label>
+          </div>
+
           <div className="ai-panel">
             <div className="row">
               <input
@@ -453,14 +584,33 @@ export default function CvEditor() {
               ))}
 
               <div className="row" style={{ marginTop: 4 }}>
-                <button type="button" className="btn btn-primary" onClick={saveChanges}>
-                  Save changes
+                <button type="button" className="btn btn-primary" onClick={saveChanges} disabled={!isDirty}>
+                  {isDirty ? "Save changes" : "Saved"}
                 </button>
-                <button type="button" className="btn btn-secondary" onClick={renderPdf}>
+                {/* The renderer reads the profile from the database, so an
+                    unsaved toggle would not appear in the PDF. Better to block
+                    than to hand over a document that silently omits your edits. */}
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={renderPdf}
+                  disabled={isDirty}
+                  title={isDirty ? "Save your changes first — the PDF is rendered from the saved profile" : undefined}
+                >
                   Render PDF
                 </button>
+                {lastRender && (
+                  <a className="btn btn-primary" href={api.cv.renderPdfUrl(lastRender.id)} download>
+                    Download {lastRender.filename}
+                  </a>
+                )}
                 {renderMsg && <span className="alert alert-info">{renderMsg}</span>}
               </div>
+              {isDirty && (
+                <p style={{ color: "var(--muted)", fontSize: "0.85rem", marginTop: 8 }}>
+                  Unsaved changes. The preview and the PDF both render from the saved profile.
+                </p>
+              )}
               {saveError && <div className="alert alert-error" style={{ marginTop: 8 }}>{saveError}</div>}
             </div>
 

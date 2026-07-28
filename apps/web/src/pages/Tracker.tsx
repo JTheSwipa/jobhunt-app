@@ -1,22 +1,33 @@
 import { useEffect, useState } from "react";
-import { api, type Application } from "../lib/api";
+import { api, type Application, type CvRender } from "../lib/api";
 
 const STATUSES = ["shortlist", "applied", "interview", "offer", "rejected"] as const;
 
 export default function Tracker() {
   const [applications, setApplications] = useState<Application[]>([]);
+  const [renders, setRenders] = useState<CvRender[]>([]);
   const [loading, setLoading] = useState(true);
   const [form, setForm] = useState({ company: "", role: "", location: "", source: "", atsPlatform: "" });
 
   async function refresh() {
     setLoading(true);
-    setApplications(await api.tracker.list());
+    const [apps, rs] = await Promise.all([api.tracker.list(), api.cv.listRenders()]);
+    setApplications(apps);
+    setRenders(rs);
     setLoading(false);
   }
 
   useEffect(() => {
     refresh();
   }, []);
+
+  // Attaching a render is what makes "which CV did I send to Acme?" answerable.
+  // The row records the render, not the profile: profiles are mutable, so a
+  // pointer at one would quietly start lying the next time it was edited.
+  async function attachRender(id: string, cvRenderId: string) {
+    await api.tracker.update(id, { cvRenderId: cvRenderId || null });
+    refresh();
+  }
 
   async function addRow(e: React.FormEvent) {
     e.preventDefault();
@@ -62,6 +73,7 @@ export default function Tracker() {
               <th>Applied</th>
               <th>Status</th>
               <th>ATS</th>
+              <th>CV sent</th>
               <th></th>
             </tr>
           </thead>
@@ -81,6 +93,30 @@ export default function Tracker() {
                   </select>
                 </td>
                 <td>{a.atsPlatform ?? "—"}</td>
+                <td>
+                  {a.cvRender ? (
+                    // profileName comes off the render itself, so this still
+                    // reads correctly after that profile is renamed or deleted.
+                    <a href={api.cv.renderPdfUrl(a.cvRender.id)} download title={a.cvRender.filename}>
+                      {a.cvRender.profileName}
+                      <span style={{ color: "var(--muted)" }}>
+                        {" "}
+                        · {new Date(a.cvRender.createdAt).toLocaleDateString()}
+                      </span>
+                    </a>
+                  ) : renders.length === 0 ? (
+                    <span style={{ color: "var(--muted)" }}>no renders yet</span>
+                  ) : (
+                    <select value="" onChange={(e) => attachRender(a.id, e.target.value)}>
+                      <option value="">— attach —</option>
+                      {renders.map((r) => (
+                        <option key={r.id} value={r.id}>
+                          {r.profileName} · {new Date(r.createdAt).toLocaleDateString()}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                </td>
                 <td>
                   <button type="button" onClick={() => remove(a.id)}>
                     Delete

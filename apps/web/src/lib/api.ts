@@ -35,6 +35,30 @@ export interface CvProfile {
   visibility: Record<string, boolean>;
   order: string[];
   style: "default" | "compact";
+  // The per-profile pitch. null => inherit the master's value, "" => render
+  // nothing at all. This is what actually differentiates two variants of a
+  // small CV, where there is nothing meaningful to hide.
+  headline: string | null;
+  summary: string | null;
+  // Server-derived, read-only. contentHash is sha256 of the HTML this profile
+  // renders to, so two variants producing an identical document can be flagged.
+  // orphans are override keys pointing at ids the master no longer has — the
+  // visibility engine fails open, so without this an item you believe is hidden
+  // ships anyway. Both need the master CV plus the renderer, so neither can be
+  // computed in the browser.
+  contentHash?: string | null;
+  orphans?: string[];
+}
+
+/** An immutable record of one rendered CV — what actually went out. */
+export interface CvRender {
+  id: string;
+  profileName: string;
+  filename: string;
+  contentHash: string;
+  style: string;
+  createdAt: string;
+  cvProfileId: string | null;
 }
 
 export interface Application {
@@ -50,6 +74,10 @@ export interface Application {
   responseType?: string | null;
   notes?: string | null;
   jobListingId?: string | null;
+  // Which CV went out. The joined receipt carries its own profileName, so this
+  // still reads correctly after the source profile is renamed or deleted.
+  cvRenderId?: string | null;
+  cvRender?: { id: string; profileName: string; filename: string; createdAt: string } | null;
 }
 
 export interface JobListing {
@@ -79,12 +107,20 @@ export const api = {
     toggles: (masterId: string) => request<ToggleNode[]>(`/cv/master/${masterId}/toggles`),
     renderOrder: () => request<string[]>("/cv/render-order"),
     listProfiles: (masterCvId: string) => request<CvProfile[]>(`/cv/profiles?masterCvId=${masterCvId}`),
-    createProfile: (body: Omit<CvProfile, "id">) =>
+    createProfile: (body: Omit<CvProfile, "id" | "contentHash" | "orphans">) =>
       request<CvProfile>("/cv/profiles", { method: "POST", body: JSON.stringify(body) }),
-    updateProfile: (id: string, body: Partial<Omit<CvProfile, "id" | "masterCvId">>) =>
+    updateProfile: (id: string, body: Partial<Omit<CvProfile, "id" | "masterCvId" | "contentHash" | "orphans">>) =>
       request<CvProfile>(`/cv/profiles/${id}`, { method: "PUT", body: JSON.stringify(body) }),
     deleteProfile: (id: string) => request<void>(`/cv/profiles/${id}`, { method: "DELETE" }),
-    render: (id: string) => request<{ htmlPath: string; pdfPath: string }>(`/cv/profiles/${id}/render`, { method: "POST" }),
+    render: (id: string) =>
+      request<{ htmlPath: string; pdfPath: string; id: string; filename: string; contentHash: string }>(
+        `/cv/profiles/${id}/render`,
+        { method: "POST" },
+      ),
+    listRenders: () => request<CvRender[]>("/cv/renders"),
+    // A plain URL rather than a fetch: the browser's own download handling gets
+    // the Content-Disposition filename right, which is the whole point.
+    renderPdfUrl: (renderId: string) => `${BASE}/cv/renders/${renderId}/pdf`,
     suggest: (id: string, targetRole: string) =>
       request<TailoringSuggestion[]>(`/cv/profiles/${id}/suggest`, { method: "POST", body: JSON.stringify({ targetRole }) }),
     previewUrl: (id: string) => `${BASE}/cv/profiles/${id}/preview`,
