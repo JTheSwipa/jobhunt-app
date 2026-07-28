@@ -46,7 +46,11 @@ document, so no section prefix is needed there.
 A [table-driven test suite](apps/api/src/cv/visibility.test.ts) covers this
 engine specifically: every section type, the full master × override
 precedence matrix, section/item independence, the master-immutability
-invariant, multi-profile isolation, and malformed input.
+invariant, multi-profile isolation, and malformed input. The HTTP layer has
+its own suite alongside it ([cv](apps/api/src/routes/cv.test.ts),
+[jobs](apps/api/src/routes/jobs.test.ts),
+[tracker](apps/api/src/routes/tracker.test.ts)) covering validation, the job
+board ↔ tracker sync branches, and the error paths.
 
 ## AI tailoring — suggests, never applies
 
@@ -118,7 +122,9 @@ ollama serve
 ollama pull qwen2.5:7b
 ```
 
-Run the visibility engine's test suite with `cd apps/api && npm test`.
+Run the API test suite with `cd apps/api && npm test` — the visibility engine
+plus every HTTP route, exercised over real sockets against a mocked Prisma
+client, so no database is needed to run it.
 
 ## Status
 
