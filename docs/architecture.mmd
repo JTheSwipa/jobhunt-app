@@ -1,34 +1,42 @@
-graph LR
-  Browser["Browser: React + Vite<br/>CV Editor · Job Board · Tracker"]
-  Vite["Vite dev server<br/>proxies /api"]
+graph TB
+  User(["Clone it and run it<br/>single user, self-hosted"])
 
-  subgraph API["API server (Express)"]
-    CvRoutes["cv.ts"]
-    JobsRoutes["jobs.ts"]
-    TrackerRoutes["tracker.ts"]
-    Visibility["visibility.ts + render.ts<br/>applies overrides, never<br/>mutates the master CV"]
-    Registry["job source registry"]
+  subgraph Client["Browser"]
+    UI["React + Vite<br/>CV Editor · Job Board · Tracker"]
   end
 
-  Indeed["Indeed adapter"]
-  CareerOS["CareerOS adapter<br/>disabled, returns 409"]
-  Postgres[("Postgres via Prisma<br/>MasterCv · CvProfile<br/>JobListing · Application")]
-  Ollama["Ollama: local LLM<br/>runs on host"]
-  Python["indeed_scan.py<br/>python-jobspy subprocess"]
+  subgraph Server["API — Node · Express · Prisma"]
+    Routes["HTTP routes<br/>CV · jobs · tracker"]
+    Engine["Visibility + pitch engine<br/>one master CV, many named variants<br/>the master is never mutated"]
+    Registry["Job source registry<br/>adapters behind one interface"]
+  end
 
-  Browser --> Vite
-  Vite --> CvRoutes
-  Vite --> JobsRoutes
-  Vite --> TrackerRoutes
+  subgraph State["State, all on your machine"]
+    Postgres[("Postgres<br/>MasterCv · CvProfile · CvRender<br/>Application · JobListing")]
+    Archive["PDF archive<br/>one file per render, never overwritten"]
+  end
 
-  CvRoutes --> Visibility --> Postgres
-  CvRoutes -->|"suggest: advisory only,<br/>never auto-applies"| Ollama
+  Renderer["Headless browser<br/>any Chromium-compatible binary<br/>set via CHROMIUM_BIN"]
+  LLM["Ollama — optional<br/>local model, no API key, no metering"]
+  Scraper["python-jobspy subprocess<br/>the one non-TypeScript piece"]
+  Indeed(["Indeed"])
 
-  JobsRoutes --> Registry
-  Registry --> Indeed
-  Registry --> CareerOS
-  Indeed -->|execFile| Python
-  JobsRoutes -->|persist listings| Postgres
-  JobsRoutes -->|"shortlist/applied syncs to Application,<br/>never downgrades interview/offer/rejected"| Postgres
+  User --> UI
+  UI -->|"HTTP · JSON<br/>/api proxied to the API"| Routes
 
-  TrackerRoutes --> Postgres
+  Routes --> Engine
+  Routes --> Registry
+  Routes -.->|"suggests toggles, never applies them<br/>a human confirms every change"| LLM
+
+  Engine --> Postgres
+  Engine -->|"resolve the variant, then render"| Renderer
+  Renderer --> Archive
+  Renderer -->|"immutable receipt: the resolved<br/>CV, hashed and frozen"| Postgres
+
+  Registry --> Scraper
+  Scraper ==>|"the only call that leaves your machine"| Indeed
+
+  classDef ext fill:#fff4e5,stroke:#b45309,stroke-width:2px,color:#7c3d00
+  classDef opt fill:#f7faf9,stroke:#63666b,stroke-dasharray: 5 5,color:#14151a
+  class Indeed,Scraper ext
+  class LLM opt

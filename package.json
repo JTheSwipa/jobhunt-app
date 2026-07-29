@@ -11,6 +11,10 @@
     "dev:api": "npm run dev --workspace=apps/api",
     "dev:web": "npm run dev --workspace=apps/web",
     "db:up": "docker compose up -d db",
-    "db:migrate": "npm run prisma:migrate --workspace=apps/api"
+    "db:migrate": "npm run prisma:migrate --workspace=apps/api",
+    "docs:diagram": "node scripts/render-diagram.mjs"
+  },
+  "devDependencies": {
+    "playwright-core": "^1.49.0"
   }
 }
