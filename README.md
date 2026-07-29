@@ -1,8 +1,88 @@
+<div align="center">
+
 # jobhunt-app
 
-A self-hosted job-hunt tool: one master CV that projects into multiple named,
-sector-tailored variants without ever being edited by hand per application,
-plus a lightweight job board and application tracker built around it.
+**One master CV. Many tailored variants. A receipt for every one you send.**
+
+A self-hosted job-hunt tool. Keep one CV, project it into as many
+sector-tailored versions as you need without ever editing it by hand per
+application, then track where each version actually went.
+
+Runs entirely on your own machine. No account, no API key, no hosted service.
+
+</div>
+
+![CV Editor](docs/screenshots/cv-editor.png)
+
+---
+
+## What is this?
+
+Tailoring a CV per application usually means duplicating the file. Six months
+later you have eleven near-identical CVs, a typo fixed in four of them, and no
+idea which one you sent to the company that just called you back.
+
+This keeps **one** master CV. A *profile* is a named set of changes layered on
+top of it at render time — hide this section, lead with that pitch — and the
+master is never touched. Add a twelfth variant and it costs one row, not a
+twelfth file to keep in sync. Every PDF you render is frozen into a receipt, so
+"which CV did this company get?" stays answerable months later, even after
+you've edited the variant that produced it.
+
+There's also a job board (Indeed) and an application tracker, wired together:
+shortlisting a listing creates the tracker row for you.
+
+It does **not** auto-apply to anything, and the local AI only ever *suggests*
+which sections to hide — a human confirms every change.
+
+---
+
+## Quick start
+
+```bash
+# 1. Postgres (host port 5433 — 5432 was already taken locally)
+docker compose up -d db
+
+# 2. API — copy apps/api/.env.example to apps/api/.env first
+cd apps/api
+npm install
+npm run prisma:migrate
+npm run dev          # tsx watch, http://localhost:4000
+
+# 3. Web, in another terminal
+cd apps/web
+npm install
+npm run dev           # vite, http://localhost:5173
+
+# 4. Local AI tailoring, in another terminal — optional
+ollama serve
+ollama pull qwen2.5:7b
+```
+
+Then open `http://localhost:5173` and upload an rxresume-style CV JSON export.
+
+Run the API test suite with `cd apps/api && npm test` — the visibility engine
+plus every HTTP route, exercised over real sockets against a mocked Prisma
+client, so no database is needed to run it.
+
+---
+
+## The rest of the app
+
+Screenshots use the fake `example_data/master_cv.json` fixture, not real CV
+content.
+
+**Job Board** — Indeed results with per-listing status actions.
+
+![Job Board](docs/screenshots/job-board.png)
+
+**Tracker** — shortlisting or applying on the Job Board materializes (or
+updates) a matching row here automatically; manual entries work the same as
+before. The "CV sent" column links to the exact PDF that went out.
+
+![Tracker](docs/screenshots/tracker.png)
+
+---
 
 ## The CV visibility engine
 
@@ -107,9 +187,32 @@ uses — there is no code path from "model responds" to "profile changes."
 
 ![Architecture](docs/architecture.png)
 
-_Editable source: [`docs/architecture.excalidraw`](docs/architecture.excalidraw)
-— open at [excalidraw.com](https://excalidraw.com) (File → Open) or with the
-Excalidraw VS Code extension._
+_Source: [`docs/architecture.mmd`](docs/architecture.mmd) (Mermaid).
+Regenerate the PNG and SVG with `npm run docs:diagram` — it drives whatever
+Chromium `CHROMIUM_BIN` points at, the same one the CV renderer uses._
+
+**It all runs on one machine.** Clone it, start Postgres and two dev servers,
+and you have the whole thing. There is no account to create, no API key to
+paste, and no hosted service in the loop. Exactly one call leaves your
+machine: the Indeed search. Your CV never does.
+
+**Two dependencies are optional and fail honestly.** Without Ollama the AI
+tailoring endpoint returns a 502 that names the missing piece, and everything
+else keeps working. Without the Python venv the Indeed adapter is the only
+thing that breaks. Neither is load-bearing for the CV engine, which is the
+part worth looking at.
+
+**The PDF renderer is whatever Chromium you already have.** It shells out to a
+headless browser to print the CV, resolved via `CHROMIUM_BIN`, so Chrome,
+Chromium, or a snap install all work without a bundled 100 MB binary in the
+repo.
+
+**Two invariants hold the design up.** The master CV is never mutated — a
+variant is a set of overrides applied to a copy at render time, so adding a
+tenth variant costs one row, not a tenth duplicate to keep in sync. And every
+render writes an immutable receipt, so "which CV did I send to this company?"
+stays answerable after the variant that produced it has been edited, renamed,
+or deleted.
 
 **Job sources are an adapter behind a small registry**
 (`apps/api/src/jobs/`), not a plugin system — just a `JobSource` interface
@@ -140,32 +243,6 @@ stdout; dedup is the Node side's job, via Postgres's unique constraint on
   (`python-jobspy`).
 - **AI**: Ollama, local, `qwen2.5:7b` by default.
 
-## Local setup
-
-```bash
-# 1. Postgres (host port 5433 — 5432 was already taken locally)
-docker compose up -d db
-
-# 2. API — copy apps/api/.env.example to apps/api/.env first
-cd apps/api
-npm install
-npm run prisma:migrate
-npm run dev          # tsx watch, http://localhost:4000
-
-# 3. Web, in another terminal
-cd apps/web
-npm install
-npm run dev           # vite, http://localhost:5173
-
-# 4. Local AI tailoring, in another terminal
-ollama serve
-ollama pull qwen2.5:7b
-```
-
-Run the API test suite with `cd apps/api && npm test` — the visibility engine
-plus every HTTP route, exercised over real sockets against a mocked Prisma
-client, so no database is needed to run it.
-
 ## Status
 
 **Built**: the CV visibility engine and per-profile overrides, sector
@@ -186,23 +263,3 @@ progress you've already logged there (interview/offer/rejected).
   directly, but reaching into a company's backend instead of using their own
   UI while actively applying there is a judgment call for a direct
   conversation, not something to decide unilaterally by shipping code.
-
-## Screenshots
-
-**CV Editor** — sector profiles, AI tailoring suggestions, section reordering,
-and the override marker (the green left-edge bar + "overridden" tag) showing
-exactly which toggles this profile has explicitly set versus what it just
-inherits from the master. Screenshots use the fake `example_data/master_cv.json`
-fixture, not real CV content.
-
-![CV Editor](docs/screenshots/cv-editor.png)
-
-**Job Board** — Indeed results with per-listing status actions.
-
-![Job Board](docs/screenshots/job-board.png)
-
-**Tracker** — shortlisting or applying on the Job Board materializes (or
-updates) a matching row here automatically; manual entries work the same as
-before.
-
-![Tracker](docs/screenshots/tracker.png)
